@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# ts-sftp — SFTP sessions with hardware-bound consent
+# SPDX-License-Identifier: MIT
+set -euo pipefail
+TOUCHSTONE_LIB="$(cd "$(dirname "$0")/../lib" && pwd)"
+source "$TOUCHSTONE_LIB/touchstone-core.sh"
+[ $# -eq 0 ] && { echo "Usage: ts-sftp [sftp-args...] user@host" >&2; exit 1; }
+ts_launch_captured "sftp" sftp "$@"

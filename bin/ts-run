@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# ts-run — Interactive command runner with hardware-bound consent
+# For commands with prompts, confirmations, progress output.
+# User sees everything live and can interact. Caller gets exit code.
+# SPDX-License-Identifier: MIT
+set -euo pipefail
+TOUCHSTONE_LIB="$(cd "$(dirname "$0")/../lib" && pwd)"
+source "$TOUCHSTONE_LIB/touchstone-core.sh"
+[ $# -eq 0 ] && { echo "Usage: ts-run <command> [args...]" >&2; exit 1; }
+ts_launch_interactive "run" "$@"
