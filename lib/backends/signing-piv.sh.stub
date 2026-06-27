@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# ── Signing Backend: YubiKey PIV (PKCS#11) ─────────────────────────
+# Enterprise backend. Signs audit records with YubiKey PIV slot.
+# Provides non-repudiation — operator cannot forge signatures.
+#
+# Requires: opensc, yubico-piv-tool, PKCS#11 module
+# Config: signing_backend=piv in ~/.touchstone/config.conf
+#
+# STUB — not yet implemented. Interface contract only.
+# SPDX-License-Identifier: MIT
+
+# _ts_backend_sign_init()
+#   Initialize PIV signing. Verify YubiKey is present,
+#   PIV slot 9c (Digital Signature) has a cert, and
+#   the cert chains to the Mitonet CA.
+#
+# _ts_backend_sign_record "$data"
+#   Sign data with PIV slot 9c via pkcs11-tool.
+#   Returns base64-encoded ECDSA/RSA signature.
+#   Requires YubiKey touch (PIN cached per session).
+#
+# _ts_backend_sign_verify "$data" "$signature"
+#   Verify signature against the public cert in PIV slot 9c.
+#   Does NOT require YubiKey presence (public key operation).
+#
+# _ts_backend_sign_output "$outfile" "$session_id"
+#   Sign output file with PIV. Signature file contains
+#   session_id|sha256|piv_signature (base64).
+#
+# _ts_backend_verify_output "$outfile"
+#   Verify output signature against PIV public cert.

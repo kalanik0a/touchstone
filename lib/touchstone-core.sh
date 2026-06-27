@@ -14,14 +14,42 @@ set -euo pipefail
 # [CWE-200, CWE-377] All temp files owner-only
 umask 077
 
-# [CWE-426] Restrict PATH to known-safe system directories
+# [CWE-426] Resolve critical tool paths from current (trusted) PATH,
+# then restrict PATH to known-safe system directories.
 # [CWE-668] _TS_ORIG_PATH is NOT exported — only used by inspector pane
 _TS_ORIG_PATH="${PATH}"
+
+# Resolve tools we need BEFORE restricting PATH (NixOS keeps them in /nix/store)
+# Also check common nix profile paths if not in current PATH
+_ts_find_tool() {
+  local tool="$1"
+  command -v "$tool" 2>/dev/null && return
+  # NixOS profile search paths
+  local p
+  for p in /etc/profiles/per-user/*/bin /run/current-system/sw/bin /nix/var/nix/profiles/default/bin; do
+    [ -x "$p/$tool" ] && { echo "$p/$tool"; return; }
+  done
+  # Last resort: search nix store bin directories
+  find /nix/store -maxdepth 3 -path "*/bin/$tool" -type f 2>/dev/null | head -1
+}
+_TS_OPENSSL="$(_ts_find_tool openssl)"
+_TS_SQLITE3="$(_ts_find_tool sqlite3)"
+
 PATH="/run/wrappers/bin:/run/current-system/sw/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # Resolve lib directory (where this script and assets live)
 TOUCHSTONE_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOUCHSTONE_WEZ_CONFIG="${TOUCHSTONE_LIB}/wezterm-config.lua"
+
+# ── Load Modules ─────────────────────────────────────────────────────
+source "$TOUCHSTONE_LIB/touchstone-backends.sh"
+source "$TOUCHSTONE_LIB/touchstone-audit.sh"
+source "$TOUCHSTONE_LIB/touchstone-policy.sh"
+source "$TOUCHSTONE_LIB/touchstone-integrity.sh"
+
+# ── Initialize Backends + Audit on Load ──────────────────────────────
+_ts_load_config
+_ts_audit_init
 
 # ── Temp Directory ───────────────────────────────────────────────────
 # [CWE-367, CWE-59] Single private temp dir per invocation.
@@ -232,6 +260,21 @@ ts_launch_captured() {
   local LABEL="$1"; shift
   _ts_validate_label "$LABEL"
 
+  # ── Agent Identity + Session ────────────────────────────────────
+  local TS_SESSION_ID
+  TS_SESSION_ID=$(_ts_generate_session_id)
+  local AGENT_ID
+  AGENT_ID=$(_ts_resolve_agent_id)
+
+  # ── Policy Decision Point ──────────────────────────────────────
+  if ! _ts_policy_check "$@"; then
+    _ts_audit_log "policy_deny" "$LABEL" "$TS_SESSION_ID" "$AGENT_ID" "" "$_TS_POLICY_RULE" "$@"
+    return 1
+  fi
+
+  # ── Log Launch ─────────────────────────────────────────────────
+  _ts_audit_log "launched" "$LABEL" "$TS_SESSION_ID" "$AGENT_ID" "" "" "$@"
+
   local TS_TMPDIR
   TS_TMPDIR=$(_ts_mktmpdir "$LABEL")
 
@@ -273,6 +316,7 @@ _out="$TS_OUTFILE" _rc="$TS_RCFILE" _done="$TS_DONEFILE"
 env -u TS_ARGS_FILE -u TS_OUTFILE -u TS_RCFILE -u TS_DONEFILE \
     -u TS_LABEL -u TS_CODE_SCRIPT -u TS_INSP_SCRIPT \
     -u _TS_ORIG_PATH -u WEZTERM_CONFIG_FILE \
+    -u TS_SESSION_ID -u TS_AGENT_ID \
     "${CMD_ARGS[@]}" > "$_out" 2>&1
 echo $? > "$_rc"
 
@@ -293,6 +337,8 @@ MAINEOF
       TS_OUTFILE="$OUTFILE" \
       TS_RCFILE="$RCFILE" \
       TS_DONEFILE="$DONEFILE" \
+      TS_SESSION_ID="$TS_SESSION_ID" \
+      TS_AGENT_ID="$AGENT_ID" \
       wezterm start --always-new-process --class "touchstone-$LABEL" -- bash "$MAIN_SCRIPT"
 
     # [CWE-755] Detect launch failure — if started sentinel doesn't appear in 5s, wezterm failed
@@ -302,6 +348,7 @@ MAINEOF
     done
     if [ ! -f "$DONEFILE.started" ]; then
       echo "Touchstone: terminal emulator failed to start" >&2
+      _ts_audit_log "error" "$LABEL" "$TS_SESSION_ID" "$AGENT_ID" "1" "terminal_launch_failed" "$@"
       return 1
     fi
 
@@ -313,6 +360,7 @@ MAINEOF
 
     if [ ! -f "$DONEFILE" ]; then
       echo "Touchstone: command did not complete (terminal closed or timeout)" >&2
+      _ts_audit_log "timeout" "$LABEL" "$TS_SESSION_ID" "$AGENT_ID" "" "" "$@"
     fi
   else
     # Fallback: single-pane terminal, args via env var
@@ -322,6 +370,7 @@ MAINEOF
 readarray -d '' CMD_ARGS < "$TS_ARGS_FILE"
 _out="$TS_OUTFILE" _rc="$TS_RCFILE"
 env -u TS_ARGS_FILE -u TS_OUTFILE -u TS_RCFILE -u _TS_ORIG_PATH \
+    -u TS_SESSION_ID -u TS_AGENT_ID \
     "${CMD_ARGS[@]}" > "$_out" 2>&1
 echo $? > "$_rc"
 sleep 0.3
@@ -339,6 +388,7 @@ FBEOF
         xterm -title "Touchstone: $LABEL" -e bash "$FALLBACK_SCRIPT"
     else
       echo "Touchstone: no supported terminal emulator found (need wezterm, terminator, gnome-terminal, or xterm)" >&2
+      _ts_audit_log "error" "$LABEL" "$TS_SESSION_ID" "$AGENT_ID" "1" "no_terminal" "$@"
       return 1
     fi
   fi
@@ -346,6 +396,16 @@ FBEOF
   [ -f "$OUTFILE" ] && cat "$OUTFILE"
   local RC=1
   [ -f "$RCFILE" ] && RC=$(cat "$RCFILE")
+
+  # ── Sign Output + Log Completion ───────────────────────────────
+  _ts_sign_output "$OUTFILE" "$TS_SESSION_ID"
+
+  if [ "$RC" -eq 0 ]; then
+    _ts_audit_log "completed" "$LABEL" "$TS_SESSION_ID" "$AGENT_ID" "$RC" "" "$@"
+  else
+    _ts_audit_log "completed" "$LABEL" "$TS_SESSION_ID" "$AGENT_ID" "$RC" "nonzero_exit" "$@"
+  fi
+
   # Cleanup handled by trap
   return "$RC"
 }
@@ -358,6 +418,21 @@ FBEOF
 ts_launch_interactive() {
   local LABEL="$1"; shift
   _ts_validate_label "$LABEL"
+
+  # ── Agent Identity + Session ────────────────────────────────────
+  local TS_SESSION_ID
+  TS_SESSION_ID=$(_ts_generate_session_id)
+  local AGENT_ID
+  AGENT_ID=$(_ts_resolve_agent_id)
+
+  # ── Policy Decision Point ──────────────────────────────────────
+  if ! _ts_policy_check "$@"; then
+    _ts_audit_log "policy_deny" "$LABEL" "$TS_SESSION_ID" "$AGENT_ID" "" "$_TS_POLICY_RULE" "$@"
+    return 1
+  fi
+
+  # ── Log Launch ─────────────────────────────────────────────────
+  _ts_audit_log "launched" "$LABEL" "$TS_SESSION_ID" "$AGENT_ID" "" "" "$@"
 
   local TS_TMPDIR
   TS_TMPDIR=$(_ts_mktmpdir "$LABEL")
@@ -393,6 +468,7 @@ _rc="$TS_RCFILE" _done="$TS_DONEFILE"
 env -u TS_ARGS_FILE -u TS_RCFILE -u TS_DONEFILE \
     -u TS_LABEL -u TS_CODE_SCRIPT -u TS_INSP_SCRIPT \
     -u _TS_ORIG_PATH -u WEZTERM_CONFIG_FILE \
+    -u TS_SESSION_ID -u TS_AGENT_ID \
     "${CMD_ARGS[@]}"
 echo $? > "$_rc"
 
@@ -412,6 +488,8 @@ MAINEOF
       TS_INSP_SCRIPT="$INSPECTOR_SCRIPT" \
       TS_RCFILE="$RCFILE" \
       TS_DONEFILE="$DONEFILE" \
+      TS_SESSION_ID="$TS_SESSION_ID" \
+      TS_AGENT_ID="$AGENT_ID" \
       wezterm start --always-new-process --class "touchstone-$LABEL" -- bash "$MAIN_SCRIPT"
 
     local WAIT=0
@@ -420,6 +498,7 @@ MAINEOF
     done
     if [ ! -f "$DONEFILE.started" ]; then
       echo "Touchstone: terminal emulator failed to start" >&2
+      _ts_audit_log "error" "$LABEL" "$TS_SESSION_ID" "$AGENT_ID" "1" "terminal_launch_failed" "$@"
       return 1
     fi
 
@@ -427,6 +506,10 @@ MAINEOF
     while [ ! -f "$DONEFILE" ] && [ "$WAIT" -lt 9000 ]; do
       sleep 0.2; WAIT=$((WAIT + 1))
     done
+
+    if [ ! -f "$DONEFILE" ]; then
+      _ts_audit_log "timeout" "$LABEL" "$TS_SESSION_ID" "$AGENT_ID" "" "" "$@"
+    fi
   else
     local FALLBACK_SCRIPT="$TS_TMPDIR/fallback.sh"
     cat > "$FALLBACK_SCRIPT" << 'FBEOF'
@@ -434,6 +517,7 @@ MAINEOF
 readarray -d '' CMD_ARGS < "$TS_ARGS_FILE"
 _rc="$TS_RCFILE"
 env -u TS_ARGS_FILE -u TS_RCFILE -u _TS_ORIG_PATH \
+    -u TS_SESSION_ID -u TS_AGENT_ID \
     "${CMD_ARGS[@]}"
 echo $? > "$_rc"
 printf '\nDone. Press Enter.\n'
@@ -452,11 +536,20 @@ FBEOF
         xterm -title "Touchstone: $LABEL" -e bash "$FALLBACK_SCRIPT"
     else
       echo "Touchstone: no supported terminal emulator found" >&2
+      _ts_audit_log "error" "$LABEL" "$TS_SESSION_ID" "$AGENT_ID" "1" "no_terminal" "$@"
       return 1
     fi
   fi
 
   local RC=1
   [ -f "$RCFILE" ] && RC=$(cat "$RCFILE")
+
+  # ── Log Completion ─────────────────────────────────────────────
+  if [ "$RC" -eq 0 ]; then
+    _ts_audit_log "completed" "$LABEL" "$TS_SESSION_ID" "$AGENT_ID" "$RC" "" "$@"
+  else
+    _ts_audit_log "completed" "$LABEL" "$TS_SESSION_ID" "$AGENT_ID" "$RC" "nonzero_exit" "$@"
+  fi
+
   return "$RC"
 }

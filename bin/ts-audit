@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# ts-audit — Query and verify the Touchstone audit log
+# SPDX-License-Identifier: MIT
+set -euo pipefail
+
+# Resolve tools before PATH restriction
+_ts_find_tool() {
+  local tool="$1"
+  command -v "$tool" 2>/dev/null && return
+  local p
+  for p in /etc/profiles/per-user/*/bin /run/current-system/sw/bin /nix/var/nix/profiles/default/bin; do
+    [ -x "$p/$tool" ] && { echo "$p/$tool"; return; }
+  done
+  find /nix/store -maxdepth 3 -path "*/bin/$tool" -type f 2>/dev/null | head -1
+}
+_TS_OPENSSL="$(_ts_find_tool openssl)"
+_TS_SQLITE3="$(_ts_find_tool sqlite3)"
+
+TOUCHSTONE_LIB="$(cd "$(dirname "$0")/../lib" && pwd)"
+source "$TOUCHSTONE_LIB/touchstone-backends.sh"
+source "$TOUCHSTONE_LIB/touchstone-audit.sh"
+source "$TOUCHSTONE_LIB/touchstone-policy.sh"
+source "$TOUCHSTONE_LIB/touchstone-integrity.sh"
+
+_ts_load_config
+_ts_audit_init
+
+usage() {
+  cat << 'EOF'
+Usage: ts-audit <command> [args...]
+
+Audit Log:
+  recent [N]          Show last N consent events (default: 20)
+  stats               Audit statistics by event type and agent
+  verify              Verify HMAC integrity of all records
+  search <term>       Search command previews
+  agent <id>          Show events for a specific agent
+  session <id>        Show events for a specific session
+  denials             Show all policy denials
+  export [csv|json]   Export audit log
+
+Policy Engine:
+  policy              List active policy rules
+  policy-test <cmd>   Test a command against the policy engine
+
+Integrity:
+  verify-output <file>  Verify HMAC signature of a captured output file
+EOF
+}
+
+case "${1:-help}" in
+  recent)
+    _ts_audit_recent "${2:-20}"
+    ;;
+  stats)
+    _ts_audit_stats
+    ;;
+  verify)
+    _ts_audit_verify
+    ;;
+  search)
+    [ -z "${2:-}" ] && { echo "Usage: ts-audit search <term>" >&2; exit 1; }
+    "$_TS_SQLITE3" -header -column "$_TS_AUDIT_DB" \
+      "SELECT id, timestamp, event_type, agent_id, tool, command_preview, exit_code \
+       FROM consent_events WHERE command_preview LIKE '%${2}%' ORDER BY id DESC"
+    ;;
+  agent)
+    [ -z "${2:-}" ] && { echo "Usage: ts-audit agent <id>" >&2; exit 1; }
+    "$_TS_SQLITE3" -header -column "$_TS_AUDIT_DB" \
+      "SELECT id, timestamp, event_type, tool, command_preview, exit_code \
+       FROM consent_events WHERE agent_id LIKE '%${2}%' ORDER BY id DESC"
+    ;;
+  session)
+    [ -z "${2:-}" ] && { echo "Usage: ts-audit session <id>" >&2; exit 1; }
+    "$_TS_SQLITE3" -header -column "$_TS_AUDIT_DB" \
+      "SELECT id, timestamp, event_type, agent_id, tool, command_preview, exit_code, policy_rule \
+       FROM consent_events WHERE session_id = '${2}' ORDER BY id"
+    ;;
+  denials)
+    "$_TS_SQLITE3" -header -column "$_TS_AUDIT_DB" \
+      "SELECT id, timestamp, agent_id, tool, command_preview, policy_rule \
+       FROM consent_events WHERE event_type = 'policy_deny' ORDER BY id DESC"
+    ;;
+  export)
+    case "${2:-csv}" in
+      csv)
+        "$_TS_SQLITE3" -header -csv "$_TS_AUDIT_DB" "SELECT * FROM consent_events ORDER BY id"
+        ;;
+      json)
+        "$_TS_SQLITE3" -json "$_TS_AUDIT_DB" "SELECT * FROM consent_events ORDER BY id"
+        ;;
+      *)
+        echo "Usage: ts-audit export [csv|json]" >&2; exit 1
+        ;;
+    esac
+    ;;
+  policy)
+    _ts_policy_list
+    ;;
+  policy-test)
+    shift
+    [ $# -eq 0 ] && { echo "Usage: ts-audit policy-test <command> [args...]" >&2; exit 1; }
+    if _ts_policy_check "$@"; then
+      printf '\033[1;32mALLOWED\033[0m: command would proceed to consent window.\n'
+    else
+      printf '\033[1;31mDENIED\033[0m: command blocked by policy.\n'
+      exit 1
+    fi
+    ;;
+  verify-output)
+    [ -z "${2:-}" ] && { echo "Usage: ts-audit verify-output <file>" >&2; exit 1; }
+    if _ts_verify_output "$2"; then
+      printf '\033[1;32mVERIFIED\033[0m: output file integrity intact.\n'
+    else
+      exit 1
+    fi
+    ;;
+  help|--help|-h)
+    usage
+    ;;
+  *)
+    echo "Unknown command: $1" >&2
+    usage >&2
+    exit 1
+    ;;
+esac

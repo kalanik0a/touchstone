@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# ── Roles Backend: PAM Group RBAC ──────────────────────────────────
+# Enterprise backend. Checks Unix group membership for role separation.
+#
+# Groups:
+#   ts-operator  — can approve consent requests (turn the key)
+#   ts-auditor   — can read/verify audit logs, cannot approve
+#   ts-admin     — can modify policy rules, manage backends
+#
+# Requires: Unix groups created, users assigned
+# Config: roles_backend=pam-group in ~/.touchstone/config.conf
+#
+# STUB — not yet implemented. Interface contract only.
+# SPDX-License-Identifier: MIT
+
+# _ts_backend_check_role "$required_role"
+#   Check if current user is a member of ts-$required_role group.
+#   Returns 0 if authorized, 1 if denied.
+#   Uses `id -Gn` to check group membership.
+#
+# _ts_backend_get_role
+#   Returns the highest-privilege role the current user holds:
+#   admin > operator > auditor
+#   Used for display/logging purposes.

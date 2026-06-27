@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# ── Identity Backend: x509 Client Certificate ─────────────────────
+# Enterprise backend. Resolves agent identity from client certificate
+# presented via environment variable or Unix socket credential.
+#
+# Requires: CA infrastructure, per-agent certs, OCSP responder
+# Config: identity_backend=x509 in ~/.touchstone/config.conf
+#
+# STUB — not yet implemented. Interface contract only.
+# SPDX-License-Identifier: MIT
+
+# _ts_backend_resolve_identity
+#   1. Read agent cert from TS_AGENT_CERT or TS_AGENT_CERT_PATH
+#   2. Validate cert chain against CA bundle
+#   3. Check OCSP/CRL for revocation status
+#   4. Extract subject CN as agent identity
+#   Returns: "x509:<subject_cn>" or fails with exit 1
+#
+# _ts_backend_generate_session_id
+#   Generate session ID bound to the agent cert:
+#   sha256(cert_fingerprint + timestamp + random)
+#   This creates a cryptographic binding between the
+#   session and the agent's identity.
