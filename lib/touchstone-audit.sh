@@ -139,10 +139,14 @@ _ts_audit_log() {
   cmd_hash=$(_ts_hash_command "$@")
 
   # Hash any script/source file found in args
+  # [CWE-703] A file arg unreadable by the invoking user (e.g. a root-only
+  # config passed to ts-sudo) must not abort the launch under set -e/pipefail
+  # — record an explicit marker instead of a hash.
   local code_hash=""
   for arg in "$@"; do
     if [ -f "$arg" ]; then
-      code_hash=$(sha256sum "$arg" 2>/dev/null | cut -d' ' -f1)
+      code_hash=$(sha256sum "$arg" 2>/dev/null | cut -d' ' -f1) \
+        || code_hash="unreadable-by-invoker"
       break
     fi
   done
@@ -151,7 +155,8 @@ _ts_audit_log() {
   if [ "${1:-}" = "make" ] || [ "${1:-}" = "sudo" -a "${2:-}" = "make" ]; then
     for mf in Makefile makefile GNUmakefile; do
       if [ -f "$mf" ]; then
-        code_hash=$(sha256sum "$mf" 2>/dev/null | cut -d' ' -f1)
+        code_hash=$(sha256sum "$mf" 2>/dev/null | cut -d' ' -f1) \
+          || code_hash="unreadable-by-invoker"
         break
       fi
     done
