@@ -297,6 +297,11 @@ ts_launch_captured() {
     # [CWE-78] Quoted heredoc — no shell expansion inside.
     # [CWE-668] TS_* env vars stripped before executing the privileged command
     #           via env -u, preventing output/RC file tampering and PATH leak.
+    # [CWE-522] SSH_AUTH_SOCK/SSH_AGENT_PID/SSH_ASKPASS are severed in every
+    #           launch path: the desktop keyring must never become a second
+    #           auth chain behind the consent window. PAM + FIDO2 at consent
+    #           is the single auth overlay; key passphrases prompt only on
+    #           this pane's tty (SSH_ASKPASS_REQUIRE=never).
     cat > "$MAIN_SCRIPT" << 'MAINEOF'
 #!/usr/bin/env bash
 # Read args from NUL-delimited file
@@ -317,6 +322,8 @@ env -u TS_ARGS_FILE -u TS_OUTFILE -u TS_RCFILE -u TS_DONEFILE \
     -u TS_LABEL -u TS_CODE_SCRIPT -u TS_INSP_SCRIPT \
     -u _TS_ORIG_PATH -u WEZTERM_CONFIG_FILE \
     -u TS_SESSION_ID -u TS_AGENT_ID \
+    -u SSH_AUTH_SOCK -u SSH_AGENT_PID -u SSH_ASKPASS \
+    SSH_ASKPASS_REQUIRE=never \
     "${CMD_ARGS[@]}" > "$_out" 2>&1
 echo $? > "$_rc"
 
@@ -371,6 +378,8 @@ readarray -d '' CMD_ARGS < "$TS_ARGS_FILE"
 _out="$TS_OUTFILE" _rc="$TS_RCFILE"
 env -u TS_ARGS_FILE -u TS_OUTFILE -u TS_RCFILE -u _TS_ORIG_PATH \
     -u TS_SESSION_ID -u TS_AGENT_ID \
+    -u SSH_AUTH_SOCK -u SSH_AGENT_PID -u SSH_ASKPASS \
+    SSH_ASKPASS_REQUIRE=never \
     "${CMD_ARGS[@]}" > "$_out" 2>&1
 echo $? > "$_rc"
 sleep 0.3
@@ -469,6 +478,8 @@ env -u TS_ARGS_FILE -u TS_RCFILE -u TS_DONEFILE \
     -u TS_LABEL -u TS_CODE_SCRIPT -u TS_INSP_SCRIPT \
     -u _TS_ORIG_PATH -u WEZTERM_CONFIG_FILE \
     -u TS_SESSION_ID -u TS_AGENT_ID \
+    -u SSH_AUTH_SOCK -u SSH_AGENT_PID -u SSH_ASKPASS \
+    SSH_ASKPASS_REQUIRE=never \
     "${CMD_ARGS[@]}"
 echo $? > "$_rc"
 
@@ -518,6 +529,8 @@ readarray -d '' CMD_ARGS < "$TS_ARGS_FILE"
 _rc="$TS_RCFILE"
 env -u TS_ARGS_FILE -u TS_RCFILE -u _TS_ORIG_PATH \
     -u TS_SESSION_ID -u TS_AGENT_ID \
+    -u SSH_AUTH_SOCK -u SSH_AGENT_PID -u SSH_ASKPASS \
+    SSH_ASKPASS_REQUIRE=never \
     "${CMD_ARGS[@]}"
 echo $? > "$_rc"
 printf '\nDone. Press Enter.\n'
