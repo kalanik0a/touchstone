@@ -2,13 +2,12 @@ PREFIX ?= /usr/local
 BINDIR  = $(PREFIX)/bin
 LIBDIR  = $(PREFIX)/lib/touchstone
 
-.PHONY: install uninstall check
+.PHONY: install uninstall check test
 
 install:
 	@echo "Installing Touchstone to $(PREFIX)..."
 	@mkdir -p $(DESTDIR)$(BINDIR) $(DESTDIR)$(LIBDIR)
-	@cp lib/touchstone-core.sh $(DESTDIR)$(LIBDIR)/
-	@cp lib/wezterm-config.lua $(DESTDIR)$(LIBDIR)/
+	@cp -R lib/. $(DESTDIR)$(LIBDIR)/
 	@for tool in bin/ts-*; do \
 		name=$$(basename $$tool); \
 		sed 's|$$(cd "$$(dirname "$$0")/../lib" && pwd)|$(LIBDIR)|' $$tool > $(DESTDIR)$(BINDIR)/$$name; \
@@ -41,3 +40,10 @@ check:
 		rpm -q pam-u2f 2>/dev/null | grep -q pam-u2f && printf '  %-12s ✓\n' "pam_u2f" || \
 		test -f /etc/pam.d/sudo && grep -q u2f /etc/pam.d/sudo 2>/dev/null && printf '  %-12s ✓\n' "pam_u2f" || \
 		printf '  %-12s ? (check: pam_u2f, libfido2)\n' "pam_u2f"
+
+test:
+	@python3 -m unittest discover -s tests -v
+	@python3 -m py_compile hooks/touchstone_gate.py
+	@for file in bin/ts-* lib/*.sh lib/backends/*.sh; do bash -n "$$file"; done
+	@bash tests/test_signing_backend.sh
+	@echo "Touchstone unit, hook-contract, Python, and Bash syntax tests passed."

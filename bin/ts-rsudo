@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# ts-rsudo — REMOTE privileged execution with hardware-bound consent.
+# Runs a command under sudo on a REMOTE host over SSH, gated by the same
+# three-pane Touchstone consent + YubiKey touch as ts-sudo / ts-ssh.
+#
+# The hardware touch authorizes the (sk-)SSH auth to the target; the remote
+# sudo runs non-interactively (`sudo -n`), so the target's agent user must
+# have a NOPASSWD sudoers rule (install once via bootstrap; scope tightly).
+#
+# Usage: ts-rsudo user@host <command> [args...]
+#   e.g. ts-rsudo seanlum@visionlighter.mitonet.arpa bash /home/seanlum/x.sh
+#        ts-rsudo seanlum@visionlighter.mitonet.arpa systemctl restart unbound
+#
+# For multi-step remote shell, put it in a script and run `bash <script>`
+# rather than inlining pipelines — keeps the consent review readable and
+# avoids embedding shell metacharacters.
+# SPDX-License-Identifier: MIT
+set -euo pipefail
+TOUCHSTONE_LIB="$(cd "$(dirname "$0")/../lib" && pwd)"
+source "$TOUCHSTONE_LIB/touchstone-core.sh"
+
+[ $# -lt 2 ] && { echo "Usage: ts-rsudo user@host <command> [args...]" >&2; exit 1; }
+DEST="$1"; shift
+case "$DEST" in
+  -*) echo "ts-rsudo: first argument must be the destination (user@host), not an option" >&2; exit 1 ;;
+esac
+
+# Remote: sudo -n (non-interactive; needs NOPASSWD), -H (HOME=/root), -- ends sudo opts.
+ts_launch_captured "rsudo" ssh "$DEST" sudo -n -H -- "$@"

@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# ts-show — standalone interactive WezTerm Markdown displayer for `voiced`.
+#
+# Pops a three-pane WezTerm window: (A) the reply's Markdown rendered with glow,
+# (B) a live shell, (C) raw source for clean copy/paste. NON-PRIVILEGED — no
+# YubiKey, no consent, no audit, no policy. Adapts Touchstone's WezTerm launch/
+# split mechanics only (touchstone-core.sh ~296-342); does NOT touch the consent
+# core. Zero-trust: the reply is untrusted data — written to a temp .md and
+# rendered read-only, never eval'd or shell-interpolated.
+#
+# Usage: ts-show [--title TITLE] [FILE.md]     (no FILE => read markdown on stdin)
+set -euo pipefail
+
+TITLE="voiced"
+FILE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --title) TITLE="${2:-voiced}"; shift 2 ;;
+    *)       FILE="$1"; shift ;;
+  esac
+done
+
+# Degrade silently with no display / no wezterm — voiced must keep speaking.
+command -v wezterm >/dev/null 2>&1 || exit 3
+[ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] || exit 3
+
+# Capture content into a temp .md — NEVER interpolate content into a command.
+MD="$(mktemp /tmp/ts-show.XXXXXX.md)"
+if [ -n "$FILE" ]; then cat -- "$FILE" > "$MD"; else cat > "$MD"; fi
+[ -s "$MD" ] || { rm -f "$MD"; exit 4; }
+
+# Pane-A launcher script (runs inside the new WezTerm window).
+MAIN="$(mktemp /tmp/ts-show-main.XXXXXX.sh)"
+cat > "$MAIN" << 'MAINEOF'
+#!/usr/bin/env bash
+# Runs in pane A. TS_MD = the markdown temp file. Clean up on close.
+trap 'rm -f "$TS_MD" "$0"' EXIT
+DIR="$(dirname "$TS_MD")"
+# Pane B — interactive shell (the "interactive terminal" requirement)
+wezterm cli split-pane --bottom --percent 40 -- \
+  bash -c "cd \"$DIR\"; echo '[voiced] live shell — rendered reply is above, raw source to the right'; exec bash" \
+  >/dev/null 2>&1 || true
+# Pane C — raw markdown source for exact copy/paste
+wezterm cli split-pane --right --percent 50 -- \
+  bash -c "less -N \"$TS_MD\"" >/dev/null 2>&1 || true
+wezterm cli activate-pane-direction up   >/dev/null 2>&1 || true
+wezterm cli activate-pane-direction up   >/dev/null 2>&1 || true
+# Pane A — rendered markdown: glow via nix-shell (project convention), less fallback
+if command -v nix-shell >/dev/null 2>&1; then
+  nix-shell -p glow --run "glow -p \"$TS_MD\"" || less -N "$TS_MD"
+else
+  less -N "$TS_MD"
+fi
+MAINEOF
+chmod 0700 "$MAIN"
+
+# Reuse Touchstone's wezterm config (pane keybinds) if present — display only.
+WEZ_CFG="$HOME/Code/Skills/touchstone/lib/wezterm-config.lua"
+
+# Launch detached so the window lingers independently of voiced / this process.
+if [ -f "$WEZ_CFG" ]; then
+  TS_MD="$MD" WEZTERM_CONFIG_FILE="$WEZ_CFG" \
+    setsid wezterm start --always-new-process --class "ts-show-$TITLE" \
+    -- bash "$MAIN" >/dev/null 2>&1 &
+else
+  TS_MD="$MD" \
+    setsid wezterm start --always-new-process --class "ts-show-$TITLE" \
+    -- bash "$MAIN" >/dev/null 2>&1 &
+fi
+exit 0

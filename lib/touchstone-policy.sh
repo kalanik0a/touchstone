@@ -6,9 +6,16 @@
 #
 # Policy files: ~/.touchstone/policy.conf (user), lib/default-policy.conf (builtin)
 # Format: action:pattern:description
-#   action: deny | warn
+#   action: deny | warn | allow
 #   pattern: shell glob matched against the full command string
 #   description: human-readable reason
+#
+# allow: stops policy evaluation and proceeds to the consent window.
+# It does NOT bypass hardware consent — the human still reviews and
+# authorizes with a YubiKey touch. Because the user policy is read
+# first, an allow rule there overrides a builtin deny (PDP override;
+# the human remains the PEP). Scope allow patterns as narrowly as
+# possible (exact device, exact path) and date-stamp the description.
 #
 # Standards: NIST 800-207 PDP/PEP, CISA ZTMM Advanced
 # SPDX-License-Identifier: MIT
@@ -46,6 +53,15 @@ _ts_policy_check() {
       case "$cmd_string" in
         $pattern|$pattern\ *)
           case "$action" in
+            allow)
+              # PDP override: stop policy evaluation, proceed to the
+              # consent window. Hardware consent (YubiKey) still gates
+              # execution — this never bypasses the human reviewer.
+              _TS_POLICY_RULE="${action}:${pattern}:${description}"
+              printf '\033[1;32m[POLICY ALLOW]\033[0m %s\n' "$description" >&2
+              printf '\033[2m  Rule: %s (consent window still required)\033[0m\n' "$pattern" >&2
+              return 0
+              ;;
             deny)
               _TS_POLICY_RULE="${action}:${pattern}:${description}"
               printf '\033[1;31m[POLICY DENY]\033[0m %s\n' "$description" >&2
@@ -77,6 +93,7 @@ _ts_policy_list() {
     printf '\033[1;36mUser policy:\033[0m %s\n' "$_TS_USER_POLICY"
     grep -v '^#' "$_TS_USER_POLICY" 2>/dev/null | grep -v '^$' | while IFS=: read -r action pattern description; do
       case "$action" in
+        allow) printf '  \033[1;32m%-5s\033[0m %-40s %s\n' "$action" "$pattern" "$description" ;;
         deny) printf '  \033[1;31m%-5s\033[0m %-40s %s\n' "$action" "$pattern" "$description" ;;
         warn) printf '  \033[1;33m%-5s\033[0m %-40s %s\n' "$action" "$pattern" "$description" ;;
       esac

@@ -7,8 +7,15 @@
 # SPDX-License-Identifier: MIT
 
 _ts_backend_sign_init() {
-  if [ ! -f "$_TS_HMAC_KEY" ]; then
-    "$_TS_OPENSSL" rand -hex 32 > "$_TS_HMAC_KEY"
+  # A zero-length key is equivalent to a public, forgeable signing key. Repair
+  # both missing and empty files, then normalize the mode on every init.
+  if [ ! -s "$_TS_HMAC_KEY" ]; then
+    local key_tmp
+    key_tmp="$(umask 077; mktemp "${_TS_HMAC_KEY}.XXXXXX")"
+    "$_TS_OPENSSL" rand -hex 32 > "$key_tmp"
+    chmod 0400 "$key_tmp"
+    mv -f "$key_tmp" "$_TS_HMAC_KEY"
+  else
     chmod 0400 "$_TS_HMAC_KEY"
   fi
 }

@@ -52,6 +52,18 @@ Add Touchstone tools to Claude Code's allowed commands in your project's `.claud
 
 This allows Claude Code to call Touchstone tools without per-invocation approval, since Touchstone itself enforces human consent with hardware authentication.
 
+### Optional deterministic hook
+
+`hooks/touchstone_gate.py` is a shared Claude Code/Codex `PreToolUse` hook. It is
+deliberately narrow: raw `sudo`, `ssh`, `scp`, `sftp`, `pkexec`, `doas`, and `su`
+at shell command boundaries are redirected to the appropriate `ts-*` wrapper.
+Ordinary unprivileged shell, filesystem, network, and development work is not
+restricted.
+
+The Claude example is `integrations/claude/hooks.json`. Set `TOUCHSTONE_ROOT` to
+the repository root in the hook environment or replace the variable with the
+absolute installation path.
+
 ### Interactive Commands
 
 For commands that require user interaction (deploy scripts, database migrations with confirmations):
@@ -75,6 +87,15 @@ ts-ssh admin@prod "cat /var/log/syslog | tail -50"
 ```
 
 No agent-specific code is needed. Touchstone is a shell-level tool, not an SDK integration.
+
+For Codex, `integrations/codex/hooks.json` uses the same shared hook program and
+Codex's `PreToolUse` response contract. Install it as a user or trusted-project
+hook, set `TOUCHSTONE_ROOT`, review/trust the hook in Codex, and test it with the
+included Python harness before enabling it broadly.
+
+The hook layer improves agent ergonomics by explaining the correct wrapper. The
+actual enforcement point remains the separate consent window plus PAM/FIDO2;
+the hook is not represented as a general agent permission sandbox.
 
 ## MCP Server (Future)
 

@@ -4,3 +4,6 @@
 *~
 .DS_Store
 result
+/outputs/
+/.crossview/
+__pycache__/

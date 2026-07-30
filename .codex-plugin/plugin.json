@@ -1,0 +1,25 @@
+{
+  "name": "touchstone",
+  "version": "0.2.0",
+  "description": "Hardware-bound human consent for privileged operations from Claude Code, Codex, and other local agents.",
+  "author": {
+    "name": "Sean Jeffery Kalanikoa Lum",
+    "url": "https://github.com/kalanik0a"
+  },
+  "repository": "https://github.com/kalanik0a/touchstone",
+  "license": "MIT",
+  "keywords": ["touchstone", "yubikey", "fido2", "sudo", "agent-security"],
+  "interface": {
+    "displayName": "Touchstone",
+    "shortDescription": "Hardware consent for privileged agent operations",
+    "longDescription": "Routes privileged local and remote operations through a separate review window and physical YubiKey consent without restricting ordinary agent work.",
+    "developerName": "Sean Jeffery Kalanikoa Lum",
+    "category": "Developer Tools",
+    "capabilities": ["Shell", "Human Approval"],
+    "websiteURL": "https://github.com/kalanik0a/touchstone",
+    "defaultPrompt": [
+      "Use Touchstone for the next privileged operation.",
+      "Show the recent Touchstone consent audit."
+    ]
+  }
+}

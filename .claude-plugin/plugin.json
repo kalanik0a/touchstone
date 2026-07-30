@@ -1,0 +1,5 @@
+{
+  "name": "touchstone",
+  "version": "0.2.0",
+  "description": "Hardware-bound human consent for privileged operations from Claude Code, Codex, and other local agents."
+}
