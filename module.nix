@@ -24,6 +24,14 @@ let
     ts_launch_${mode} "${lib.removePrefix "ts-" name}" ${extraArgs}"$@"
   '';
 
+  # ts-rsudo has a positional DEST + injected `sudo -n -H --` and an
+  # interactive (-i) PTY mode, so it can't use the mkTool template — ship
+  # the real bin/ script, pointing it at the store lib via TOUCHSTONE_LIB.
+  mkRsudo = pkgs.writeShellScriptBin "ts-rsudo" ''
+    export TOUCHSTONE_LIB="${touchstoneLib}"
+    exec ${pkgs.bash}/bin/bash ${./bin/ts-rsudo} "$@"
+  '';
+
   mkAuditTool = pkgs.writeShellScriptBin "ts-audit" ''
     set -euo pipefail
     _ts_find_tool() {
@@ -54,6 +62,7 @@ in
     (mkTool "ts-scp"  "captured" "scp ")
     (mkTool "ts-sftp" "captured" "sftp ")
     (mkTool "ts-run"  "interactive" "")
+    mkRsudo
     mkAuditTool
     pkgs.openssl
     pkgs.sqlite

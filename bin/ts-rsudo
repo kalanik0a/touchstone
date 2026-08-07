@@ -3,27 +3,57 @@
 # Runs a command under sudo on a REMOTE host over SSH, gated by the same
 # three-pane Touchstone consent + YubiKey touch as ts-sudo / ts-ssh.
 #
-# The hardware touch authorizes the (sk-)SSH auth to the target; the remote
-# sudo runs non-interactively (`sudo -n`), so the target's agent user must
-# have a NOPASSWD sudoers rule (install once via bootstrap; scope tightly).
+# The hardware touch authorizes the (sk-)SSH auth to the target. Two modes:
 #
-# Usage: ts-rsudo user@host <command> [args...]
-#   e.g. ts-rsudo seanlum@visionlighter.mitonet.arpa bash /home/seanlum/x.sh
-#        ts-rsudo seanlum@visionlighter.mitonet.arpa systemctl restart unbound
+#   default        remote sudo runs non-interactively (`sudo -n`) and the
+#                  output is captured. The target user needs a NOPASSWD
+#                  sudoers rule for the command (install once; scope tightly).
+#
+#   -i / --interactive
+#                  for commands NOT covered by a NOPASSWD rule. The command
+#                  runs LIVE in the consent pane over an SSH PTY (`ssh -tt`)
+#                  with a prompting sudo, so you authenticate the remote sudo
+#                  (password / PAM) directly in the window. Caller gets the
+#                  exit code (output is shown live, not captured), like ts-run.
+#                  This is the edge-case path when tightening the NOPASSWD
+#                  scope is undesirable and a human is present at the consent.
+#
+# Usage: ts-rsudo [-i|--interactive] user@host <command> [args...]
+#   e.g. ts-rsudo seanlum@visionlighter.mitonet.arpa systemctl restart unbound
+#        ts-rsudo -i seanlum@visionlighter.mitonet.arpa bash /home/seanlum/x.sh
 #
 # For multi-step remote shell, put it in a script and run `bash <script>`
 # rather than inlining pipelines — keeps the consent review readable and
 # avoids embedding shell metacharacters.
 # SPDX-License-Identifier: MIT
 set -euo pipefail
-TOUCHSTONE_LIB="$(cd "$(dirname "$0")/../lib" && pwd)"
+# Honour a caller-provided TOUCHSTONE_LIB (the NixOS module sets it to the
+# store lib path); fall back to the checkout layout for standalone use.
+TOUCHSTONE_LIB="${TOUCHSTONE_LIB:-$(cd "$(dirname "$0")/../lib" && pwd)}"
 source "$TOUCHSTONE_LIB/touchstone-core.sh"
 
-[ $# -lt 2 ] && { echo "Usage: ts-rsudo user@host <command> [args...]" >&2; exit 1; }
+usage() {
+  echo "Usage: ts-rsudo [-i|--interactive] user@host <command> [args...]" >&2
+  exit 1
+}
+
+INTERACTIVE=0
+case "${1:-}" in
+  -i|--interactive) INTERACTIVE=1; shift ;;
+  -*) echo "ts-rsudo: unknown option '$1'" >&2; usage ;;
+esac
+
+[ $# -lt 2 ] && usage
 DEST="$1"; shift
 case "$DEST" in
   -*) echo "ts-rsudo: first argument must be the destination (user@host), not an option" >&2; exit 1 ;;
 esac
 
-# Remote: sudo -n (non-interactive; needs NOPASSWD), -H (HOME=/root), -- ends sudo opts.
-ts_launch_captured "rsudo" ssh "$DEST" sudo -n -H -- "$@"
+if [ "$INTERACTIVE" -eq 1 ]; then
+  # Interactive: force a remote PTY (ssh -tt) and let sudo prompt live in the
+  # consent pane. -H sets HOME=/root; -- ends sudo option parsing.
+  ts_launch_interactive "rsudo" ssh -tt "$DEST" sudo -H -- "$@"
+else
+  # Non-interactive: sudo -n (needs NOPASSWD), -H (HOME=/root), -- ends opts.
+  ts_launch_captured "rsudo" ssh "$DEST" sudo -n -H -- "$@"
+fi
